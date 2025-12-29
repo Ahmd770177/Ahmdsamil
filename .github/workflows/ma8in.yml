@@ -1,0 +1,67 @@
+name: NoxPlayer-Auto-Setup
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: 1. تحسين الأداء وفتح المنافذ
+        run: |
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+
+      - name: 2. تحميل NoxPlayer ومكتبات GPU (Mesa3D)
+        run: |
+          # إنشاء مجلد للعمل
+          New-Item -ItemType Directory -Path "C:\NoxSetup"
+          
+          # تحميل NoxPlayer (الرابط الرسمي)
+          Write-Host "Downloading NoxPlayer..."
+          $noxUrl = "https://res06.bignox.com/full/20230519/919f9699709a47368d4001a91345511b.exe"
+          Invoke-WebRequest -Uri $noxUrl -OutFile "C:\NoxSetup\Nox_Installer.exe"
+          
+          # تحميل مكتبات Mesa3D لخداع كرت الشاشة
+          Write-Host "Downloading GPU Fix (Mesa3D)..."
+          $mesaUrl = "https://github.com/pal1000/mesa-dist-win/releases/download/23.1.1/mesa3d-23.1.1-release-msvc.7z"
+          Invoke-WebRequest -Uri $mesaUrl -OutFile "C:\NoxSetup\mesa.7z"
+          
+          # فك ضغط مكتبات GPU
+          choco install 7zip -y
+          & "C:\Program Files\7-Zip\7z.exe" x "C:\NoxSetup\mesa.7z" -o"C:\NoxSetup\MesaFiles" -y
+          
+          # استخراج الملفات الضرورية فقط لتسهيل العملية عليك
+          New-Item -ItemType Directory -Path "C:\NoxSetup\Fix_Files"
+          Copy-Item "C:\NoxSetup\MesaFiles\x64\opengl32.dll" -Destination "C:\NoxSetup\Fix_Files\"
+          Copy-Item "C:\NoxSetup\MesaFiles\x64\libglapi.dll" -Destination "C:\NoxSetup\Fix_Files\"
+
+      - name: 3. إنشاء حساب المستخدم
+        run: |
+          $password = "NoxCloud@2025"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "NoxAdmin" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "NoxAdmin"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "NoxAdmin"
+
+      - name: 4. الاتصال عبر Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=Nox-Machine
+
+      - name: 5. عرض التعليمات والبقاء متصلاً
+        run: |
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          Write-Host "`n==============================================="
+          Write-Host "IP: $tsIP"
+          Write-Host "User: NoxAdmin | Pass: NoxCloud@2025"
+          Write-Host "-----------------------------------------------"
+          Write-Host "1. افتح مجلد C:\NoxSetup وقم بتثبيت NoxPlayer."
+          Write-Host "2. بعد التثبيت، انسخ الملفات من C:\NoxSetup\Fix_Files"
+          Write-Host "3. الصقها في مجلد تثبيت NoxPlayer (bin)."
+          Write-Host "==============================================="
+          while ($true) { Start-Sleep -Seconds 300 }
