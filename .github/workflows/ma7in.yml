@@ -1,0 +1,51 @@
+name: NoxPlayer-Compatible-RDP
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    steps:
+      - name: 1. تحسين أداء الويندوز وتجهيز البيئة
+        run: |
+          # ضبط الأداء العالي
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          # فتح منافذ RDP
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+
+      - name: 2. تثبيت Mesa3D (لحل مشكلة تعريف كرت الشاشة)
+        run: |
+          # تحميل مكتبات Mesa3D التي توفر دعم OpenGL حديث عبر المعالج
+          $url = "https://github.com/pal1000/mesa-dist-win/releases/download/23.1.1/mesa3d-23.1.1-release-msvc.7z"
+          Invoke-WebRequest -Uri $url -OutFile "mesa.7z"
+          
+          # تثبيت 7-Zip لفك الضغط
+          choco install 7zip -y
+          & "C:\Program Files\7-Zip\7z.exe" x mesa.7z -omesa -y
+          
+          # نقل مكتبة OpenGL32.dll إلى مجلد النظام لتجاوز فحص NoxPlayer
+          Copy-Item "mesa\x64\opengl32.dll" -Destination "C:\Windows\System32\opengl32.dll" -Force
+          Copy-Item "mesa\x64\libglapi.dll" -Destination "C:\Windows\System32\libglapi.dll" -Force
+
+      - name: 3. إنشاء المستخدم والاتصال
+        run: |
+          $password = "NoxAdmin123"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "NoxUser" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "NoxUser"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "NoxUser"
+
+      - name: 4. تشغيل Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=Nox-Runner
+
+      - name: 5. الحفاظ على الجهاز نشطاً
+        run: |
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          Write-Host "IP Address: $tsIP"
+          Write-Host "User: NoxUser | Pass: NoxAdmin123"
+          while ($true) { Start-Sleep -Seconds 300 }
