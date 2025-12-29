@@ -1,0 +1,54 @@
+name: Optimized-RDP-Windows-2022
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022 # استخدام أحدث إصدار ويندوز سيرفر
+    timeout-minutes: 3600
+
+    steps:
+      - name: 1. تحسين أداء النظام والرسوميات
+        run: |
+          # ضبط الويندوز على "أفضل أداء" لتقليل استهلاك المعالج
+          $visualSettings = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
+          if (-not (Test-Path $visualSettings)) { New-Item $visualSettings -Force }
+          Set-ItemProperty -Path $visualSettings -Name "VisualFXSetting" -Value 2
+          
+          # تفعيل خاصية Hardware Graphics Capture وتحسين ضغط RDP
+          $rdpPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+          if (-not (Test-Path $rdpPath)) { New-Item $rdpPath -Force }
+          Set-ItemProperty -Path $rdpPath -Name "EnableHardwareGraphicsCapture" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+
+      - name: 2. تثبيت محاكي كرت الشاشة (Mesa3D) 
+        run: |
+          # هذا الجزء يحمل مكتبات لمحاكاة OpenGL حديث لخداع البرامج التي تطلب كرت شاشة
+          Invoke-WebRequest -Uri "https://github.com/pal1000/mesa-dist-win/releases/download/23.1.1/mesa3d-23.1.1-release-msvc.7z" -OutFile "mesa.7z"
+          # ملاحظة: يتطلب هذا فك ضغط ووضع الملفات في مجلد النظام (خطوة متقدمة)
+          Write-Host "Mesa3D libraries downloaded to simulate GPU capabilities."
+
+      - name: 3. إعداد المستخدم والاتصال
+        run: |
+          $password = "Admin@Cloud2025"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "CloudAdmin" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "CloudAdmin"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "CloudAdmin"
+
+      - name: 4. تثبيت وتفعيل Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=HighPerf-PC
+
+      - name: 5. عرض معلومات الدخول والحفاظ على العمل
+        run: |
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          Write-Host "`n==============================="
+          Write-Host "IP Address: $tsIP"
+          Write-Host "Username: CloudAdmin"
+          Write-Host "Password: Admin@Cloud2025"
+          Write-Host "==============================="
+          while ($true) { Start-Sleep -Seconds 300 }
